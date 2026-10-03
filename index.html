@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#3A2519">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="POS Quán">
+<title>POS Quán</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+:root{--bean:#3A2519;--tea:#1F5C47;--line:#D6DDD5;--muted:#65716A;--red:#B23A2A;--amber:#C98A12}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bean);font-family:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#1C2420}
+body{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+#frame{position:fixed;left:0;right:0;top:env(safe-area-inset-top,0px);bottom:env(safe-area-inset-bottom,0px);width:100%;height:calc(100% - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px));border:0;background:#EDF0EB}
+.setup{min-height:100%;display:grid;place-items:center;padding:16px}
+.card{background:#fff;border-radius:14px;padding:22px;width:100%;max-width:460px}
+h1{font-size:22px;margin:0 0 6px}h2{font-size:16px;margin:16px 0 6px}
+p{line-height:1.5}
+input,select{font:inherit;width:100%;min-height:42px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff}
+label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px;font-weight:600}
+.btn{font:inherit;font-weight:600;min-height:42px;padding:0 14px;border-radius:8px;border:1px solid var(--line);background:#F5F7F3;cursor:pointer}
+.btn.pri{background:var(--tea);border-color:var(--tea);color:#fff}
+.btn:disabled{opacity:.5}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.muted{color:var(--muted);font-size:13px}
+#pbtn{position:fixed;right:0;top:50%;transform:translateY(-50%);z-index:20;width:34px;height:46px;border-radius:10px 0 0 10px;border:0;background:var(--bean);color:#fff;font-size:17px;box-shadow:0 4px 12px rgba(0,0,0,.3);cursor:pointer;opacity:.8}
+#pbtn i{position:absolute;right:4px;top:4px;width:10px;height:10px;border-radius:5px;background:#7BC79A;border:2px solid var(--bean)}
+#pbtn i.off{background:var(--amber)}
+#panel{position:fixed;inset:0;z-index:30;background:rgba(28,22,18,.5);display:none;align-items:center;justify-content:center;padding:12px}
+#panel.on{display:flex}
+#panel .card{max-height:calc(100% - 20px);overflow:auto}
+.slot{border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:12px}
+.st{font-size:13px;font-weight:600}.st.ok{color:var(--tea)}.st.bad{color:var(--red)}
+#toast{position:fixed;left:50%;bottom:70px;transform:translateX(-50%);z-index:40;background:#1C2420;color:#fff;padding:10px 16px;border-radius:8px;display:none;max-width:90vw}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<button id="pbtn" title="Máy in" aria-label="Cài đặt máy in" hidden>🖨<i id="pdot" class="off"></i></button>
+<div id="panel"><div class="card" id="pcard"></div></div>
+<div id="toast"></div>
+<script>
+/* ================== POS QUÁN – VỎ APP (PWA) + CẦU NỐI MÁY IN ================== */
+const DEFAULT_URL='https://script.google.com/macros/s/AKfycbyntJSw_ONxOLAwD1ixzq_hvFl2Htk9cIZhqmpAGDAjlwG9PMTSaIngIQWTnoUI0JrA/exec';   // Có thể dán sẵn link Web app (…/exec) vào đây trước khi đưa lên GitHub Pages
+const $=s=>document.querySelector(s);
+const LS={get:(k,d)=>{try{const v=localStorage.getItem('posapp_'+k);return v==null?d:JSON.parse(v)}catch(e){return d}},set:(k,v)=>{try{localStorage.setItem('posapp_'+k,JSON.stringify(v))}catch(e){}}};
+function toast(m,ms){const t=$('#toast');t.textContent=m;t.style.display='block';clearTimeout(t._h);t._h=setTimeout(()=>t.style.display='none',ms||3000)}
+const enc=s=>new TextEncoder().encode(s);
+const isAndroid=/Android/i.test(navigator.userAgent),isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+
+/* ---------- Mở app ---------- */
+function appUrl(){return LS.get('url',DEFAULT_URL)||''}
+function start(){
+  const u=appUrl();
+  if(!/^https:\/\/script\.google\.com\/.+\/exec/.test(u))return setupScreen();
+  $('#root').innerHTML=`<iframe id="frame" src="${u}" allow="clipboard-read; clipboard-write; fullscreen"></iframe>`;
+  $('#pbtn').hidden=false;
+}
+function setupScreen(){
+  $('#root').innerHTML=`<div class="setup"><div class="card"><h1>POS Quán – cài đặt lần đầu</h1>
+   <p class="muted">Dán đường link Web app của Google Apps Script (kết thúc bằng <b>/exec</b>). Chỉ cần làm 1 lần trên mỗi máy.</p>
+   <label>Link Web app</label><input id="u" placeholder="https://script.google.com/macros/s/…/exec" value="${appUrl()}">
+   <div class="row" style="margin-top:14px"><button class="btn pri" id="ok">Mở ứng dụng</button></div>
+   <h2>Cài thành app</h2><p class="muted">${isIOS?'iPhone/iPad: bấm nút Chia sẻ → <b>Thêm vào MH chính</b>.':'Android/Windows (Chrome, Edge): bấm menu ⋮ → <b>Cài đặt ứng dụng</b> / <b>Thêm vào màn hình chính</b>.'}</p></div></div>`;
+  $('#ok').onclick=()=>{const v=$('#u').value.trim();if(!/^https:\/\/script\.google\.com\/.+\/exec/.test(v))return toast('Link phải có dạng https://script.google.com/…/exec');LS.set('url',v);start()};
+}
+
+/* ---------- Máy in ---------- */
+const SLOTS={receipt:'Máy in hóa đơn & phiếu bar',label:'Máy in tem nhãn ly'};
+const CFG=LS.get('printers',{receipt:{method:'dialog',paper:80,lang:'escpos'},label:{method:'dialog',lang:'tspl',invert:false,gap:2}});
+const CONN={receipt:null,label:null};
+const BLE_SERVICES=['000018f0-0000-1000-8000-00805f9b34fb','e7810a71-73ae-499d-8c15-faa9aef0c3f2','49535343-fe7d-4ae5-8fa9-9fafd205e455','0000ff00-0000-1000-8000-00805f9b34fb','0000fee7-0000-1000-8000-00805f9b34fb','0000ffe0-0000-1000-8000-00805f9b34fb','000018f1-0000-1000-8000-00805f9b34fb','0000af30-0000-1000-8000-00805f9b34fb'];
+const hasBLE=!!navigator.bluetooth,hasSerial=!!navigator.serial;
+function methods(){return [['dialog','Hộp thoại in của trình duyệt (mặc định)',true],['ble','Bluetooth (BLE) – in thẳng',hasBLE],['serial','Bluetooth đã ghép đôi / cổng COM / USB – in thẳng',hasSerial],['rawbt','App RawBT trên Android – in thẳng',isAndroid]]}
+function saveCfg(){LS.set('printers',CFG);sendInfo()}
+function ready(slot){const c=CFG[slot];if(c.method==='dialog')return false;if(c.method==='rawbt')return true;return !!CONN[slot]}
+function dot(){const any=['receipt','label'].some(s=>CFG[s].method!=='dialog');const ok=['receipt','label'].every(s=>CFG[s].method==='dialog'||ready(s));$('#pdot').className=any&&!ok?'off':'';$('#pdot').style.display=any?'':'none'}
+
+async function connect(slot){
+  const c=CFG[slot];
+  try{
+    if(c.method==='ble'){
+      const dev=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:BLE_SERVICES});
+      const ch=await bleChar(dev);CONN[slot]={type:'ble',dev,ch,name:dev.name||'Máy in Bluetooth'};
+      dev.addEventListener('gattserverdisconnected',()=>{CONN[slot]=null;dot();renderPanel()});
+      c.deviceName=dev.name||'';
+    }else if(c.method==='serial'){
+      const port=await navigator.serial.requestPort();await port.open({baudRate:Number(c.baud)||9600});
+      CONN[slot]={type:'serial',port,name:'Cổng COM / Bluetooth đã ghép'};
+    }
+    saveCfg();toast('Đã kết nối '+(CONN[slot]?CONN[slot].name:''));
+  }catch(e){if(e.name!=='NotFoundError')toast('Không kết nối được: '+e.message,4000)}
+  dot();renderPanel();
+}
+async function bleChar(dev){
+  const srv=await dev.gatt.connect();const list=await srv.getPrimaryServices();
+  for(const s of list){try{for(const ch of await s.getCharacteristics()){if(ch.properties.writeWithoutResponse||ch.properties.write)return ch}}catch(e){}}
+  throw new Error('Máy in không có kênh ghi dữ liệu BLE (có thể máy chỉ hỗ trợ Bluetooth thường – hãy dùng cách “Bluetooth đã ghép đôi / cổng COM”)');
+}
+async function autoReconnect(){
+  if(hasSerial){try{const ports=await navigator.serial.getPorts();for(const slot of ['receipt','label']){if(CFG[slot].method==='serial'&&!CONN[slot]&&ports.length){const p=ports[slot==='label'&&ports.length>1?1:0];try{await p.open({baudRate:Number(CFG[slot].baud)||9600})}catch(e){}CONN[slot]={type:'serial',port:p,name:'Cổng COM / Bluetooth đã ghép'}}}}catch(e){}}
+  if(hasBLE&&navigator.bluetooth.getDevices){try{const devs=await navigator.bluetooth.getDevices();for(const slot of ['receipt','label']){const c=CFG[slot];if(c.method!=='ble'||CONN[slot])continue;const d=devs.find(x=>x.name===c.deviceName);if(!d)continue;try{const ch=await bleChar(d);CONN[slot]={type:'ble',dev:d,ch,name:d.name}}catch(e){}}}catch(e){}}
+  dot();sendInfo();
+}
+async function writeBytes(slot,bytes){
+  const c=CFG[slot],cn=CONN[slot];
+  if(c.method==='rawbt'){let s='';for(let i=0;i<bytes.length;i+=8192)s+=String.fromCharCode.apply(null,bytes.subarray(i,i+8192));location.href='intent:base64,'+btoa(s)+'#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;';return}
+  if(!cn)throw new Error(SLOTS[slot]+' chưa kết nối – bấm nút 🖨 để kết nối');
+  if(cn.type==='serial'){const w=cn.port.writable.getWriter();try{await w.write(bytes)}finally{w.releaseLock()}return}
+  if(cn.type==='ble'){
+    if(!cn.dev.gatt.connected){cn.ch=await bleChar(cn.dev)}
+    const size=Number(c.chunk)||180,nr=cn.ch.properties.writeWithoutResponse;
+    for(let i=0;i<bytes.length;i+=size){const part=bytes.slice(i,i+size);if(nr)await cn.ch.writeValueWithoutResponse(part);else await cn.ch.writeValue(part);if(nr&&i%(size*20)===0)await new Promise(r=>setTimeout(r,15))}
+  }
+}
+/* ESC/POS: in ảnh raster theo từng dải 128 dòng rồi cắt giấy */
+function escposImage(p,cut){
+  const bw=Math.ceil(p.w/8),out=[0x1B,0x40];
+  for(let y=0;y<p.h;y+=128){const h=Math.min(128,p.h-y);out.push(0x1D,0x76,0x30,0,bw&255,bw>>8,h&255,h>>8);for(let i=y*bw;i<(y+h)*bw;i++)out.push(p.bits[i])}
+  out.push(0x1B,0x64,4);if(cut)out.push(0x1D,0x56,0x42,0x00);
+  return new Uint8Array(out);
+}
+/* TSPL (máy in tem Xprinter, TSC…): mỗi tem 1 ảnh BITMAP */
+function tsplLabel(p,wmm,hmm,cfg){
+  const bw=Math.ceil(p.w/8),head=enc(`SIZE ${wmm} mm,${hmm} mm\r\nGAP ${Number(cfg.gap)||2} mm,0 mm\r\nDIRECTION 1\r\nCLS\r\nBITMAP 0,0,${bw},${p.h},0,`);
+  const data=new Uint8Array(bw*p.h);for(let i=0;i<data.length;i++)data[i]=cfg.invert?p.bits[i]:(~p.bits[i])&255;
+  const tail=enc('\r\nPRINT 1,1\r\n');const out=new Uint8Array(head.length+data.length+tail.length);out.set(head,0);out.set(data,head.length);out.set(tail,head.length+data.length);return out;
+}
+function concat(arr){const n=arr.reduce((s,a)=>s+a.length,0),o=new Uint8Array(n);let k=0;arr.forEach(a=>{o.set(a,k);k+=a.length});return o}
+async function doPrint(job){
+  const slot=job.kind==='label'?'label':'receipt',c=CFG[slot];
+  const pages=job.pages.map(p=>({w:p.w,h:p.h,bits:p.bits instanceof Uint8Array?p.bits:new Uint8Array(p.bits)}));
+  let bytes;
+  if(slot==='label'&&c.lang==='tspl')bytes=concat(pages.map(p=>tsplLabel(p,job.labelW,job.labelH,c)));
+  else bytes=concat(pages.map((p,i)=>escposImage(p,slot==='receipt'||i===pages.length-1)));
+  window.__lastBytes=bytes;
+  await writeBytes(slot,bytes);
+}
+
+/* ---------- Giao tiếp với trang POS bên trong ---------- */
+let target=null,origin='*';
+function sendInfo(){if(!target)return;try{target.postMessage({posBridge:'info',receipt:ready('receipt'),label:ready('label'),paper:CFG.receipt.paper||80,dpi:203},origin)}catch(e){}}
+window.addEventListener('message',async e=>{
+  const d=e.data;if(!d||typeof d!=='object'||!d.posBridge)return;
+  if(!/(\.googleusercontent\.com|script\.google\.com)$/.test(new URL(e.origin==='null'?'http://x':e.origin).hostname)&&!LS.get('devAnyOrigin',false))return;
+  if(d.posBridge==='hello'){target=e.source;origin=e.origin==='null'?'*':e.origin;sendInfo()}
+  if(d.posBridge==='print'){target=e.source;try{await doPrint(d);e.source.postMessage({posBridge:'done',id:d.id,ok:true},origin)}catch(err){e.source.postMessage({posBridge:'done',id:d.id,ok:false,error:err.message},origin);toast('Lỗi in: '+err.message,5000)}}
+});
+
+/* ---------- Bảng cài đặt máy in ---------- */
+function renderPanel(){
+  const ms=methods();
+  $('#pcard').innerHTML=`<div class="row"><h1 style="flex:1">Máy in</h1><button class="btn" id="pclose">Đóng</button></div>
+  <p class="muted">Cài 1 lần trên mỗi máy. Chọn “in thẳng” để bấm Thanh toán là in luôn, không hiện hộp thoại.${isIOS?' <b>iPhone/iPad không hỗ trợ in Bluetooth từ web</b> – dùng máy in AirPrint qua hộp thoại in.':''}</p>
+  ${['receipt','label'].map(slot=>{const c=CFG[slot],cn=CONN[slot];return `<div class="slot"><b>${SLOTS[slot]}</b>
+    <label>Cách kết nối</label><select data-s="${slot}" data-k="method">${ms.map(m=>`<option value="${m[0]}" ${c.method===m[0]?'selected':''} ${m[2]?'':'disabled'}>${m[1]}${m[2]?'':' – máy này không hỗ trợ'}</option>`).join('')}</select>
+    ${slot==='receipt'?`<label>Khổ giấy</label><select data-s="receipt" data-k="paper"><option value="80" ${c.paper==80?'selected':''}>80 mm</option><option value="58" ${c.paper==58?'selected':''}>58 mm</option></select>`:
+      `<label>Ngôn ngữ máy in tem</label><select data-s="label" data-k="lang"><option value="tspl" ${c.lang==='tspl'?'selected':''}>TSPL (Xprinter XP-3xx, TSC, Gprinter…)</option><option value="escpos" ${c.lang==='escpos'?'selected':''}>ESC/POS (máy in tem dạng in bill)</option></select>
+      <label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" data-s="label" data-k="invert" style="width:18px;min-height:0" ${c.invert?'checked':''}> Đảo màu (bật nếu tem in ra bị âm bản)</label>`}
+    ${c.method==='serial'?`<label>Tốc độ cổng (baud)</label><select data-s="${slot}" data-k="baud">${[9600,19200,38400,115200].map(b=>`<option ${Number(c.baud||9600)===b?'selected':''}>${b}</option>`).join('')}</select>`:''}
+    <div class="row" style="margin-top:10px">${c.method==='ble'||c.method==='serial'?`<button class="btn pri" data-c="${slot}">${cn?'Kết nối lại':'Kết nối máy in'}</button>`:''}<button class="btn" data-t="${slot}" ${c.method==='dialog'?'disabled':''}>In thử</button>
+    <span class="st ${c.method==='dialog'?'':ready(slot)?'ok':'bad'}">${c.method==='dialog'?'Dùng hộp thoại in':c.method==='rawbt'?'Gửi qua RawBT':cn?'✓ '+cn.name:'Chưa kết nối'}</span></div></div>`}).join('')}
+  <h2>Ứng dụng</h2><div class="row"><button class="btn" id="chg">Đổi link Web app</button><button class="btn" id="rl">Tải lại</button></div>
+  <p class="muted">Bluetooth thường (không phải BLE): trên Windows ghép đôi máy in trong Cài đặt Bluetooth, máy sẽ có cổng COM → chọn “Bluetooth đã ghép đôi / cổng COM”. Trên Android dùng RawBT.</p>`;
+  $('#pclose').onclick=()=>$('#panel').classList.remove('on');
+  $('#pcard').querySelectorAll('select[data-s],input[data-s]').forEach(el=>el.onchange=()=>{const c=CFG[el.dataset.s];c[el.dataset.k]=el.type==='checkbox'?el.checked:(isNaN(el.value)?el.value:Number(el.value));if(el.dataset.k==='method')CONN[el.dataset.s]=null;saveCfg();dot();renderPanel()});
+  $('#pcard').querySelectorAll('[data-c]').forEach(b=>b.onclick=()=>connect(b.dataset.c));
+  $('#pcard').querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>testPrint(b.dataset.t));
+  $('#chg').onclick=()=>{$('#panel').classList.remove('on');$('#pbtn').hidden=true;setupScreen()};
+  $('#rl').onclick=()=>location.reload();
+}
+async function testPrint(slot){
+  const W=slot==='label'?Math.round(50*8):(CFG.receipt.paper==58?384:576),H=slot==='label'?240:200;
+  const cv=document.createElement('canvas');cv.width=W;cv.height=H;const x=cv.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,W,H);x.fillStyle='#000';
+  x.font='bold 34px Arial';x.fillText('IN THU POS',10,50);x.font='26px Arial';x.fillText('Tiếng Việt: Cà phê sữa đá',10,100);x.fillText(new Date().toLocaleString('vi-VN'),10,145);x.fillRect(10,165,W-20,6);
+  const px=x.getImageData(0,0,W,H).data,bw=Math.ceil(W/8),bits=new Uint8Array(bw*H);
+  for(let y=0;y<H;y++)for(let i=0;i<W;i++){if(px[(y*W+i)*4]<128)bits[y*bw+(i>>3)]|=0x80>>(i&7)}
+  try{await doPrint({kind:slot,pages:[{w:W,h:H,bits}],labelW:50,labelH:30});toast('Đã gửi lệnh in thử')}catch(e){toast('Lỗi in: '+e.message,5000)}
+}
+$('#pbtn').onclick=()=>{renderPanel();$('#panel').classList.add('on')};
+$('#panel').onclick=e=>{if(e.target.id==='panel')$('#panel').classList.remove('on')};
+
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+start();autoReconnect();dot();
+</script>
+</body>
+</html>
