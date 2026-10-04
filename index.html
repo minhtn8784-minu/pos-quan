@@ -47,11 +47,14 @@ label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px;font-wei
 <div id="toast"></div>
 <script>
 /* ================== POS QUÁN – VỎ APP (PWA) + CẦU NỐI MÁY IN ================== */
-const DEFAULT_URL='https://script.google.com/macros/s/AKfycbyntJSw_ONxOLAwD1ixzq_hvFl2Htk9cIZhqmpAGDAjlwG9PMTSaIngIQWTnoUI0JrA/exec';   // Có thể dán sẵn link Web app (…/exec) vào đây trước khi đưa lên GitHub Pages
+const DEFAULT_URL='';   // Có thể dán sẵn link Web app (…/exec) vào đây trước khi đưa lên GitHub Pages
 const $=s=>document.querySelector(s);
 const LS={get:(k,d)=>{try{const v=localStorage.getItem('posapp_'+k);return v==null?d:JSON.parse(v)}catch(e){return d}},set:(k,v)=>{try{localStorage.setItem('posapp_'+k,JSON.stringify(v))}catch(e){}}};
 function toast(m,ms){const t=$('#toast');t.textContent=m;t.style.display='block';clearTimeout(t._h);t._h=setTimeout(()=>t.style.display='none',ms||3000)}
 const enc=s=>new TextEncoder().encode(s);
+/* Mã nhận diện máy: tạo 1 lần, lưu lâu dài trong App (dùng cho khóa máy) */
+function deviceId(){let d=LS.get('deviceId','');if(!/^[A-Z0-9]{16,40}$/.test(d)){const a=new Uint8Array(12);crypto.getRandomValues(a);d='M'+[...a].map(x=>x.toString(36).toUpperCase().padStart(2,'0')).join('').slice(0,23);LS.set('deviceId',d)}return d}
+try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist()}catch(e){}
 const isAndroid=/Android/i.test(navigator.userAgent),isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
 
 /* ---------- Mở app ---------- */
@@ -76,8 +79,8 @@ const SLOTS={receipt:'Máy in hóa đơn & phiếu bar',label:'Máy in tem nhãn
 const CFG=LS.get('printers',{receipt:{method:'dialog',paper:80,lang:'escpos'},label:{method:'dialog',lang:'tspl',invert:false,gap:2}});
 const CONN={receipt:null,label:null};
 const BLE_SERVICES=['000018f0-0000-1000-8000-00805f9b34fb','e7810a71-73ae-499d-8c15-faa9aef0c3f2','49535343-fe7d-4ae5-8fa9-9fafd205e455','0000ff00-0000-1000-8000-00805f9b34fb','0000fee7-0000-1000-8000-00805f9b34fb','0000ffe0-0000-1000-8000-00805f9b34fb','000018f1-0000-1000-8000-00805f9b34fb','0000af30-0000-1000-8000-00805f9b34fb'];
-const hasBLE=!!navigator.bluetooth,hasSerial=!!navigator.serial;
-function methods(){return [['dialog','Hộp thoại in của trình duyệt (mặc định)',true],['ble','Bluetooth (BLE) – in thẳng',hasBLE],['serial','Bluetooth đã ghép đôi / cổng COM / USB – in thẳng',hasSerial],['rawbt','App RawBT trên Android – in thẳng',isAndroid]]}
+const hasBLE=!!navigator.bluetooth,hasSerial=!!navigator.serial,hasUSB=!!navigator.usb;
+function methods(){return [['dialog','Hộp thoại in của trình duyệt (mặc định)',true],['ble','Bluetooth (BLE) – in thẳng',hasBLE],['serial','Bluetooth đã ghép đôi / cổng COM / USB – in thẳng',hasSerial],['usb','Cáp USB trực tiếp (WebUSB) – in thẳng',hasUSB],['rawbt','App RawBT trên Android (USB / LAN / Bluetooth) – in thẳng',isAndroid]]}
 function saveCfg(){LS.set('printers',CFG);sendInfo()}
 function ready(slot){const c=CFG[slot];if(c.method==='dialog')return false;if(c.method==='rawbt')return true;return !!CONN[slot]}
 function dot(){const any=['receipt','label'].some(s=>CFG[s].method!=='dialog');const ok=['receipt','label'].every(s=>CFG[s].method==='dialog'||ready(s));$('#pdot').className=any&&!ok?'off':'';$('#pdot').style.display=any?'':'none'}
@@ -90,6 +93,9 @@ async function connect(slot){
       const ch=await bleChar(dev);CONN[slot]={type:'ble',dev,ch,name:dev.name||'Máy in Bluetooth'};
       dev.addEventListener('gattserverdisconnected',()=>{CONN[slot]=null;dot();renderPanel()});
       c.deviceName=dev.name||'';
+    }else if(c.method==='usb'){
+      const dev=await navigator.usb.requestDevice({filters:[]});
+      CONN[slot]=await usbOpen(dev);c.usbVid=dev.vendorId;c.usbPid=dev.productId;c.usbSerial=dev.serialNumber||'';
     }else if(c.method==='serial'){
       const port=await navigator.serial.requestPort();await port.open({baudRate:Number(c.baud)||9600});
       CONN[slot]={type:'serial',port,name:'Cổng COM / Bluetooth đã ghép'};
@@ -98,6 +104,15 @@ async function connect(slot){
   }catch(e){if(e.name!=='NotFoundError')toast('Không kết nối được: '+e.message,4000)}
   dot();renderPanel();
 }
+async function usbOpen(dev){
+  try{await dev.open()}catch(e){throw new Error((isAndroid?'Không mở được cổng USB: ':'Windows đang giữ máy in bằng driver – cần đổi driver sang WinUSB (xem hướng dẫn) hoặc dùng hộp thoại in. Chi tiết: ')+e.message)}
+  if(dev.configuration===null)await dev.selectConfiguration(1);
+  let itf=null,ep=null;
+  for(const i of dev.configuration.interfaces){for(const a of i.alternates){const o=a.endpoints.find(e=>e.direction==='out'&&e.type==='bulk');if(o&&(!itf||a.interfaceClass===7)){itf=i;ep=o}}}
+  if(!itf)throw new Error('Không tìm thấy cổng in trên thiết bị USB này');
+  await dev.claimInterface(itf.interfaceNumber);
+  return {type:'usb',dev,ep:ep.endpointNumber,name:(dev.productName||'Máy in USB')+(dev.manufacturerName?' – '+dev.manufacturerName:'')};
+}
 async function bleChar(dev){
   const srv=await dev.gatt.connect();const list=await srv.getPrimaryServices();
   for(const s of list){try{for(const ch of await s.getCharacteristics()){if(ch.properties.writeWithoutResponse||ch.properties.write)return ch}}catch(e){}}
@@ -105,6 +120,8 @@ async function bleChar(dev){
 }
 async function autoReconnect(){
   if(hasSerial){try{const ports=await navigator.serial.getPorts();for(const slot of ['receipt','label']){if(CFG[slot].method==='serial'&&!CONN[slot]&&ports.length){const p=ports[slot==='label'&&ports.length>1?1:0];try{await p.open({baudRate:Number(CFG[slot].baud)||9600})}catch(e){}CONN[slot]={type:'serial',port:p,name:'Cổng COM / Bluetooth đã ghép'}}}}catch(e){}}
+  if(hasUSB){try{const devs=await navigator.usb.getDevices();for(const slot of ['receipt','label']){const c=CFG[slot];if(c.method!=='usb'||CONN[slot])continue;const d=devs.find(x=>x.vendorId===c.usbVid&&x.productId===c.usbPid&&(!c.usbSerial||x.serialNumber===c.usbSerial));if(d){try{CONN[slot]=await usbOpen(d)}catch(e){}}}
+    navigator.usb.addEventListener('disconnect',e=>{['receipt','label'].forEach(s=>{if(CONN[s]&&CONN[s].dev===e.device){CONN[s]=null}});dot();sendInfo()});}catch(e){}}
   if(hasBLE&&navigator.bluetooth.getDevices){try{const devs=await navigator.bluetooth.getDevices();for(const slot of ['receipt','label']){const c=CFG[slot];if(c.method!=='ble'||CONN[slot])continue;const d=devs.find(x=>x.name===c.deviceName);if(!d)continue;try{const ch=await bleChar(d);CONN[slot]={type:'ble',dev:d,ch,name:d.name}}catch(e){}}}catch(e){}}
   dot();sendInfo();
 }
@@ -113,6 +130,7 @@ async function writeBytes(slot,bytes){
   if(c.method==='rawbt'){let s='';for(let i=0;i<bytes.length;i+=8192)s+=String.fromCharCode.apply(null,bytes.subarray(i,i+8192));location.href='intent:base64,'+btoa(s)+'#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;';return}
   if(!cn)throw new Error(SLOTS[slot]+' chưa kết nối – bấm nút 🖨 để kết nối');
   if(cn.type==='serial'){const w=cn.port.writable.getWriter();try{await w.write(bytes)}finally{w.releaseLock()}return}
+  if(cn.type==='usb'){for(let i=0;i<bytes.length;i+=16384){const r=await cn.dev.transferOut(cn.ep,bytes.slice(i,i+16384));if(r.status!=='ok')throw new Error('Lỗi gửi USB: '+r.status)}return}
   if(cn.type==='ble'){
     if(!cn.dev.gatt.connected){cn.ch=await bleChar(cn.dev)}
     const size=Number(c.chunk)||180,nr=cn.ch.properties.writeWithoutResponse;
@@ -145,7 +163,7 @@ async function doPrint(job){
 
 /* ---------- Giao tiếp với trang POS bên trong ---------- */
 let target=null,origin='*';
-function sendInfo(){if(!target)return;try{target.postMessage({posBridge:'info',receipt:ready('receipt'),label:ready('label'),paper:CFG.receipt.paper||80,dpi:203},origin)}catch(e){}}
+function sendInfo(){if(!target)return;try{target.postMessage({posBridge:'info',deviceId:deviceId(),receipt:ready('receipt'),label:ready('label'),paper:CFG.receipt.paper||80,dpi:203},origin)}catch(e){}}
 window.addEventListener('message',async e=>{
   const d=e.data;if(!d||typeof d!=='object'||!d.posBridge)return;
   if(!/(\.googleusercontent\.com|script\.google\.com)$/.test(new URL(e.origin==='null'?'http://x':e.origin).hostname)&&!LS.get('devAnyOrigin',false))return;
@@ -164,10 +182,10 @@ function renderPanel(){
       `<label>Ngôn ngữ máy in tem</label><select data-s="label" data-k="lang"><option value="tspl" ${c.lang==='tspl'?'selected':''}>TSPL (Xprinter XP-3xx, TSC, Gprinter…)</option><option value="escpos" ${c.lang==='escpos'?'selected':''}>ESC/POS (máy in tem dạng in bill)</option></select>
       <label style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" data-s="label" data-k="invert" style="width:18px;min-height:0" ${c.invert?'checked':''}> Đảo màu (bật nếu tem in ra bị âm bản)</label>`}
     ${c.method==='serial'?`<label>Tốc độ cổng (baud)</label><select data-s="${slot}" data-k="baud">${[9600,19200,38400,115200].map(b=>`<option ${Number(c.baud||9600)===b?'selected':''}>${b}</option>`).join('')}</select>`:''}
-    <div class="row" style="margin-top:10px">${c.method==='ble'||c.method==='serial'?`<button class="btn pri" data-c="${slot}">${cn?'Kết nối lại':'Kết nối máy in'}</button>`:''}<button class="btn" data-t="${slot}" ${c.method==='dialog'?'disabled':''}>In thử</button>
+    <div class="row" style="margin-top:10px">${c.method==='ble'||c.method==='serial'||c.method==='usb'?`<button class="btn pri" data-c="${slot}">${cn?'Kết nối lại':'Kết nối máy in'}</button>`:''}<button class="btn" data-t="${slot}" ${c.method==='dialog'?'disabled':''}>In thử</button>
     <span class="st ${c.method==='dialog'?'':ready(slot)?'ok':'bad'}">${c.method==='dialog'?'Dùng hộp thoại in':c.method==='rawbt'?'Gửi qua RawBT':cn?'✓ '+cn.name:'Chưa kết nối'}</span></div></div>`}).join('')}
-  <h2>Ứng dụng</h2><div class="row"><button class="btn" id="chg">Đổi link Web app</button><button class="btn" id="rl">Tải lại</button></div>
-  <p class="muted">Bluetooth thường (không phải BLE): trên Windows ghép đôi máy in trong Cài đặt Bluetooth, máy sẽ có cổng COM → chọn “Bluetooth đã ghép đôi / cổng COM”. Trên Android dùng RawBT.</p>`;
+  <h2>Ứng dụng</h2><p class="muted">Mã máy: <b>${deviceId()}</b></p><div class="row"><button class="btn" id="chg">Đổi link Web app</button><button class="btn" id="rl">Tải lại</button></div>
+  <p class="muted">Bluetooth thường: Windows ghép đôi máy in trong Cài đặt Bluetooth → chọn “cổng COM”; Android dùng RawBT. Máy in USB: Android cắm cáp OTG → chọn “Cáp USB trực tiếp”; Windows cần đổi driver sang WinUSB hoặc dùng hộp thoại in. Máy in LAN: Android dùng RawBT; Windows dùng hộp thoại in.</p>`;
   $('#pclose').onclick=()=>$('#panel').classList.remove('on');
   $('#pcard').querySelectorAll('select[data-s],input[data-s]').forEach(el=>el.onchange=()=>{const c=CFG[el.dataset.s];c[el.dataset.k]=el.type==='checkbox'?el.checked:(isNaN(el.value)?el.value:Number(el.value));if(el.dataset.k==='method')CONN[el.dataset.s]=null;saveCfg();dot();renderPanel()});
   $('#pcard').querySelectorAll('[data-c]').forEach(b=>b.onclick=()=>connect(b.dataset.c));
