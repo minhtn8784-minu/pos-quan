@@ -47,7 +47,7 @@ label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px;font-wei
 <div id="toast"></div>
 <script>
 /* ================== POS QUÁN – VỎ APP (PWA) + CẦU NỐI MÁY IN ================== */
-const DEFAULT_URL='';   // Có thể dán sẵn link Web app (…/exec) vào đây trước khi đưa lên GitHub Pages
+const DEFAULT_URL='https:/'+'/script.google.com/macros/s/AKfycbyntJSw_ONxOLAwD1ixzq_hvFl2Htk9cIZhqmpAGDAjlwG9PMTSaIngIQWTnoUI0JrA/exec';   // Có thể dán sẵn link Web app (…/exec) vào đây trước khi đưa lên GitHub Pages
 const $=s=>document.querySelector(s);
 const LS={get:(k,d)=>{try{const v=localStorage.getItem('posapp_'+k);return v==null?d:JSON.parse(v)}catch(e){return d}},set:(k,v)=>{try{localStorage.setItem('posapp_'+k,JSON.stringify(v))}catch(e){}}};
 function toast(m,ms){const t=$('#toast');t.textContent=m;t.style.display='block';clearTimeout(t._h);t._h=setTimeout(()=>t.style.display='none',ms||3000)}
