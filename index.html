@@ -161,12 +161,59 @@ async function doPrint(job){
   await writeBytes(slot,bytes);
 }
 
+/* ---------- Thông báo: số trên biểu tượng + thông báo bật lên (mức 1) + OneSignal (mức 2) ---------- */
+const NT={last:0,who:null,os:null,osReady:false,shop:'POS'};
+const notifPerm=()=>('Notification' in window)?Notification.permission:'unsupported';
+async function onUnread(n,shop){
+  NT.shop=shop||NT.shop;const prev=NT.last;NT.last=n;
+  try{if(navigator.setAppBadge){n>0?await navigator.setAppBadge(n):await navigator.clearAppBadge()}}catch(e){}
+  document.title=(n>0?'('+n+') ':'')+'POS Quán';
+  const pushOn=NT.osReady&&NT.os&&NT.os.User&&NT.os.User.PushSubscription&&NT.os.User.PushSubscription.optedIn;
+  if(n>prev&&notifPerm()==='granted'&&!pushOn){
+    try{const reg=await navigator.serviceWorker.getRegistration();const opt={body:'Bạn có '+n+' tin nhắn mới',tag:'pos-msg',renotify:true,icon:'icon-192.png',badge:'icon-192.png'};
+      if(reg)await reg.showNotification(NT.shop,opt);else new Notification(NT.shop,opt)}catch(e){}
+  }
+  notifBanner();
+}
+function loadOneSignal(appId){
+  return new Promise(res=>{
+    if(window.OneSignalDeferred&&NT.osApp===appId)return res(NT.os);
+    NT.osApp=appId;window.OneSignalDeferred=window.OneSignalDeferred||[];
+    const sc=document.createElement('script');sc.src='https:/'+'/cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js';sc.defer=true;sc.onerror=()=>res(null);document.head.appendChild(sc);
+    OneSignalDeferred.push(async OS=>{try{const base=location.pathname.replace(/[^/]*$/,'');await OS.init({appId,serviceWorkerPath:base.replace(/^\//,'')+'sw.js',serviceWorkerParam:{scope:base},notifyButton:{enable:false},autoResubscribe:true});NT.os=OS;NT.osReady=true;res(OS)}catch(e){console.warn(e);res(null)}});
+  });
+}
+async function onWho(d){
+  NT.who=d.staffId?d:null;
+  if(!d.staffId){try{if(NT.os&&NT.osReady)await NT.os.logout()}catch(e){}return notifBanner()}
+  if(d.osApp){const OS=await loadOneSignal(d.osApp);if(OS){try{await OS.login('pos_'+d.staffId);OS.User.addTags({role:d.role||'',name:d.name||''})}catch(e){}}}
+  notifBanner();
+}
+async function enableNotify(){
+  try{
+    if(NT.os&&NT.osReady){await NT.os.Notifications.requestPermission();try{await NT.os.User.PushSubscription.optIn()}catch(e){}}
+    else if('Notification' in window)await Notification.requestPermission();
+  }catch(e){}
+  toast(notifPerm()==='granted'?'Đã bật thông báo':'Thông báo chưa được cho phép – vào cài đặt trình duyệt để cho phép',4000);
+  notifBanner();renderPanelIfOpen();
+}
+function notifBanner(){
+  let b=document.getElementById('ntb');const show=NT.who&&notifPerm()==='default'&&!LS.get('ntbHide',false);
+  if(!show){if(b)b.remove();return}
+  if(!b){b=document.createElement('div');b.id='ntb';b.style.cssText='position:fixed;right:44px;top:calc(50% - 23px);z-index:21;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 10px;box-shadow:0 4px 14px rgba(0,0,0,.2);font-size:13px;display:flex;gap:8px;align-items:center';
+    b.innerHTML='🔔 <span>Nhận thông báo tin nhắn?</span><button class="btn pri" style="min-height:32px" id="ntbOk">Bật</button><button class="btn" style="min-height:32px" id="ntbNo">Để sau</button>';document.body.appendChild(b);
+    b.querySelector('#ntbOk').onclick=enableNotify;b.querySelector('#ntbNo').onclick=()=>{LS.set('ntbHide',true);b.remove()}}
+}
+function renderPanelIfOpen(){if($('#panel').classList.contains('on'))renderPanel()}
+
 /* ---------- Giao tiếp với trang POS bên trong ---------- */
 let target=null,origin='*';
 function sendInfo(){if(!target)return;try{target.postMessage({posBridge:'info',deviceId:deviceId(),receipt:ready('receipt'),label:ready('label'),paper:CFG.receipt.paper||80,dpi:203},origin)}catch(e){}}
 window.addEventListener('message',async e=>{
   const d=e.data;if(!d||typeof d!=='object'||!d.posBridge)return;
   if(!/(\.googleusercontent\.com|script\.google\.com)$/.test(new URL(e.origin==='null'?'http://x':e.origin).hostname)&&!LS.get('devAnyOrigin',false))return;
+  if(d.posBridge==='unread')onUnread(Number(d.n)||0,d.shop);
+  if(d.posBridge==='who')onWho(d);
   if(d.posBridge==='hello'){target=e.source;origin=e.origin==='null'?'*':e.origin;sendInfo()}
   if(d.posBridge==='print'){target=e.source;try{await doPrint(d);e.source.postMessage({posBridge:'done',id:d.id,ok:true},origin)}catch(err){e.source.postMessage({posBridge:'done',id:d.id,ok:false,error:err.message},origin);toast('Lỗi in: '+err.message,5000)}}
 });
@@ -184,12 +231,14 @@ function renderPanel(){
     ${c.method==='serial'?`<label>Tốc độ cổng (baud)</label><select data-s="${slot}" data-k="baud">${[9600,19200,38400,115200].map(b=>`<option ${Number(c.baud||9600)===b?'selected':''}>${b}</option>`).join('')}</select>`:''}
     <div class="row" style="margin-top:10px">${c.method==='ble'||c.method==='serial'||c.method==='usb'?`<button class="btn pri" data-c="${slot}">${cn?'Kết nối lại':'Kết nối máy in'}</button>`:''}<button class="btn" data-t="${slot}" ${c.method==='dialog'?'disabled':''}>In thử</button>
     <span class="st ${c.method==='dialog'?'':ready(slot)?'ok':'bad'}">${c.method==='dialog'?'Dùng hộp thoại in':c.method==='rawbt'?'Gửi qua RawBT':cn?'✓ '+cn.name:'Chưa kết nối'}</span></div></div>`}).join('')}
+  <h2>Thông báo</h2><div class="slot"><div class="row"><span class="grow">Trạng thái: <b>${notifPerm()==='granted'?'✓ Đã bật':notifPerm()==='denied'?'Đã chặn – vào cài đặt trình duyệt để cho phép':notifPerm()==='unsupported'?'Máy này không hỗ trợ'+(isIOS?' (thêm App vào màn hình chính rồi mở từ biểu tượng)':''):'Chưa bật'}</b>${NT.osReady?' · nhận cả khi App tắt':''}</span>${notifPerm()==='default'?'<button class="btn pri" id="ntOn">Bật thông báo</button>':''}</div></div>
   <h2>Ứng dụng</h2><p class="muted">Mã máy: <b>${deviceId()}</b></p><div class="row"><button class="btn" id="chg">Đổi link Web app</button><button class="btn" id="rl">Tải lại</button></div>
   <p class="muted">Bluetooth thường: Windows ghép đôi máy in trong Cài đặt Bluetooth → chọn “cổng COM”; Android dùng RawBT. Máy in USB: Android cắm cáp OTG → chọn “Cáp USB trực tiếp”; Windows cần đổi driver sang WinUSB hoặc dùng hộp thoại in. Máy in LAN: Android dùng RawBT; Windows dùng hộp thoại in.</p>`;
   $('#pclose').onclick=()=>$('#panel').classList.remove('on');
   $('#pcard').querySelectorAll('select[data-s],input[data-s]').forEach(el=>el.onchange=()=>{const c=CFG[el.dataset.s];c[el.dataset.k]=el.type==='checkbox'?el.checked:(isNaN(el.value)?el.value:Number(el.value));if(el.dataset.k==='method')CONN[el.dataset.s]=null;saveCfg();dot();renderPanel()});
   $('#pcard').querySelectorAll('[data-c]').forEach(b=>b.onclick=()=>connect(b.dataset.c));
   $('#pcard').querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>testPrint(b.dataset.t));
+  if($('#ntOn'))$('#ntOn').onclick=enableNotify;
   $('#chg').onclick=()=>{$('#panel').classList.remove('on');$('#pbtn').hidden=true;setupScreen()};
   $('#rl').onclick=()=>location.reload();
 }
