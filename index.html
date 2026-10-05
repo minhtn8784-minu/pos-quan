@@ -195,7 +195,7 @@ async function enableNotify(){
     else if('Notification' in window)await Notification.requestPermission();
   }catch(e){}
   toast(notifPerm()==='granted'?'Đã bật thông báo':'Thông báo chưa được cho phép – vào cài đặt trình duyệt để cho phép',4000);
-  notifBanner();renderPanelIfOpen();
+  notifBanner();renderPanelIfOpen();sendInfo();
 }
 function notifBanner(){
   let b=document.getElementById('ntb');const show=NT.who&&notifPerm()==='default'&&!LS.get('ntbHide',false);
@@ -208,7 +208,7 @@ function renderPanelIfOpen(){if($('#panel').classList.contains('on'))renderPanel
 
 /* ---------- Giao tiếp với trang POS bên trong ---------- */
 let target=null,origin='*';
-function sendInfo(){if(!target)return;try{target.postMessage({posBridge:'info',deviceId:deviceId(),receipt:ready('receipt'),label:ready('label'),paper:CFG.receipt.paper||80,dpi:203},origin)}catch(e){}}
+function sendInfo(){if(!target)return;try{target.postMessage({posBridge:'info',notif:notifPerm(),deviceId:deviceId(),receipt:ready('receipt'),label:ready('label'),paper:CFG.receipt.paper||80,dpi:203},origin)}catch(e){}}
 window.addEventListener('message',async e=>{
   const d=e.data;if(!d||typeof d!=='object'||!d.posBridge)return;
   if(!/(\.googleusercontent\.com|script\.google\.com)$/.test(new URL(e.origin==='null'?'http://x':e.origin).hostname)&&!LS.get('devAnyOrigin',false))return;
@@ -217,6 +217,7 @@ window.addEventListener('message',async e=>{
     navigator.geolocation.getCurrentPosition(p=>src.postMessage({posBridge:'geoRes',id:d.id,lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy},org),
       er=>src.postMessage({posBridge:'geoRes',id:d.id,error:er.code===1?'Chưa cho phép App truy cập vị trí – vào cài đặt trình duyệt/điện thoại để cho phép':(er.message||'Không lấy được vị trí')},org),
       {enableHighAccuracy:true,timeout:15000,maximumAge:0});return}
+  if(d.posBridge==='notify'){target=e.source;await enableNotify();sendInfo();return}
   if(d.posBridge==='unread')onUnread(Number(d.n)||0,d.shop);
   if(d.posBridge==='who')onWho(d);
   if(d.posBridge==='hello'){target=e.source;origin=e.origin==='null'?'*':e.origin;sendInfo()}
