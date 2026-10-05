@@ -212,6 +212,11 @@ function sendInfo(){if(!target)return;try{target.postMessage({posBridge:'info',d
 window.addEventListener('message',async e=>{
   const d=e.data;if(!d||typeof d!=='object'||!d.posBridge)return;
   if(!/(\.googleusercontent\.com|script\.google\.com)$/.test(new URL(e.origin==='null'?'http://x':e.origin).hostname)&&!LS.get('devAnyOrigin',false))return;
+  if(d.posBridge==='geo'){const src=e.source,org=e.origin==='null'?'*':e.origin;
+    if(!navigator.geolocation){src.postMessage({posBridge:'geoRes',id:d.id,error:'Thiết bị không hỗ trợ định vị'},org);return}
+    navigator.geolocation.getCurrentPosition(p=>src.postMessage({posBridge:'geoRes',id:d.id,lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy},org),
+      er=>src.postMessage({posBridge:'geoRes',id:d.id,error:er.code===1?'Chưa cho phép App truy cập vị trí – vào cài đặt trình duyệt/điện thoại để cho phép':(er.message||'Không lấy được vị trí')},org),
+      {enableHighAccuracy:true,timeout:15000,maximumAge:0});return}
   if(d.posBridge==='unread')onUnread(Number(d.n)||0,d.shop);
   if(d.posBridge==='who')onWho(d);
   if(d.posBridge==='hello'){target=e.source;origin=e.origin==='null'?'*':e.origin;sendInfo()}
