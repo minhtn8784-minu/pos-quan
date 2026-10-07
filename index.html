@@ -153,10 +153,13 @@ function tsplLabel(p,wmm,hmm,cfg){
 function concat(arr){const n=arr.reduce((s,a)=>s+a.length,0),o=new Uint8Array(n);let k=0;arr.forEach(a=>{o.set(a,k);k+=a.length});return o}
 async function doPrint(job){
   const slot=job.kind==='label'?'label':'receipt',c=CFG[slot];
-  const pages=job.pages.map(p=>({w:p.w,h:p.h,bits:p.bits instanceof Uint8Array?p.bits:new Uint8Array(p.bits)}));
+  const pages=(job.pages||[]).map(p=>({w:p.w,h:p.h,bits:p.bits instanceof Uint8Array?p.bits:new Uint8Array(p.bits)}));
+  const kick=new Uint8Array([0x1B,0x70,0x00,0x19,0xFA]);
+  if(!pages.length){if(job.drawer&&slot==='receipt')await writeBytes(slot,kick);return}
   let bytes;
   if(slot==='label'&&c.lang==='tspl')bytes=concat(pages.map(p=>tsplLabel(p,job.labelW,job.labelH,c)));
   else bytes=concat(pages.map((p,i)=>escposImage(p,slot==='receipt'||i===pages.length-1)));
+  if(job.drawer&&slot==='receipt')bytes=concat([kick,bytes]);
   window.__lastBytes=bytes;
   await writeBytes(slot,bytes);
 }
